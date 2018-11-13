@@ -2,8 +2,8 @@
 
 // ---------------------------------Declare Variables------------------------------------------
 // RC Input Pins
-byte thrusterPin = 3;
-byte steeringPin = 5;
+byte thrusterPin = 2;
+byte steeringPin = 3;
 byte winchPin = 6;
 byte doorPin = 7;
 byte airPumpPin = 8;
@@ -18,7 +18,13 @@ byte relayLightPin = 13;
 byte doorServoOutputPin = 15;
 byte winchServoOutputPin = 16;
 byte leftThrusterOutputPin = 17;
-byte rightThrusterOutputPin = 18; 
+byte rightThrusterOutputPin = 18;
+
+// current direction to steer
+// 0 - left 
+// 1 - straight
+// 2 - right
+byte direction = 1;
 
 
 // To store pin values
@@ -28,9 +34,15 @@ int winchPin_value;
 int airPumpPin_value;
 int doorPin_value;
 int doorMagnetPin_value;
+int thrusterPin_value;
+int steeringPin_value;
 int currentReading;
 int servoVal;
 int winchServoVal;
+int leftThrusterVal;
+int rightThrusterVal;
+int throttleVal;
+int steerVal;
 
 // Servo Objects for use with servo library
 Servo doorServo;
@@ -60,6 +72,8 @@ byte lastDoorState = 0;
 byte prev[] = {0,0};
 int high_time[] = {0,0};
 int pulse[] = {0,0};
+int thrusterMidPoint= 1500; 
+int thrusterOffset = 0; 
 
 
 void setup() {
@@ -107,8 +121,8 @@ Serial.begin(9600);
 void loop() {
   
   // Listen for PWM pulses on these pins (pin name, status)
-  //thrusterPin_value = pulseIn(thrusterPin, HIGH);
-  //steeringPin_value = pulseIn(steeringPin, HIGH);
+  pulse[0] = pulseIn(thrusterPin, HIGH);
+  pulse[1] = pulseIn(steeringPin, HIGH);
   winchPin_value = pulseIn(winchPin, HIGH);
   airPumpPin_value = pulseIn(airPumpPin, HIGH);
   doorPin_value = pulseIn(doorPin, HIGH);
@@ -144,9 +158,9 @@ void loop() {
   moveWinch(winchStatus);
   airPumpState(airPumpOn);
   //changeChargerMagnetState(chargerMagnetOn);
-  //Serial.println("Steering: " + String(pulse[1]));
-  //Serial.println("Thruster: " + String(pulse[0]));
-  Serial.println("Current Reading: " + String(currentReading));
+  Serial.println("Left Motor : " + String(leftThrusterVal));
+  Serial.println("Right Motor : " + String(rightThrusterVal));
+  //serialPrintDebug();
 }
 
 // Print the values we just read for testing
@@ -178,8 +192,39 @@ boolean moveDoor(byte doorState, byte lastDoorState){
 }
 
 void changeThruster(){
-  leftThrusterServo.writeMicroseconds(pwm[0]);
-  rightThrusterServo.writeMicroseconds(pwm[0]);
+  // calculate steering adjustments
+  throttleVal = pulse[0];
+  steerVal = pulse[1];
+  
+  leftThrusterVal = throttleVal;
+  rightThrusterVal = throttleVal;
+  
+  thrusterOffset = steerVal - thrusterMidPoint;
+  
+  direction = findDirection(steerVal);
+  
+  // TODO: make this also work while going in reverse 
+  switch (direction){
+    case 0:
+    // left
+    // thruster Offset is negative
+    leftThrusterVal = leftThrusterVal + thrusterOffset;
+    break;
+    
+    case 2: 
+    // right
+    // thruster Offset is negative
+    rightThrusterVal = rightThrusterVal + thrusterOffset;
+    break;
+    
+    default:
+    // straight
+    break; 
+  }
+  
+  
+  leftThrusterServo.writeMicroseconds(normalizeThrusterValue(leftThrusterVal));
+  rightThrusterServo.writeMicroseconds(normalizeThrusterValue(rightThrusterVal));
 }
 
 // update the status of the winch 
@@ -307,6 +352,35 @@ void openDoor(){
 void closeDoor(){
   // send servo to home position (closed)
   doorServo.write(0);
+}
+
+// Make sure the pwm value cannot be outside the values the motor can handle 
+int normalizeThrusterValue(int value){
+  if (value < 1100){
+    value = 1100;
+  }
+  else if (value > 1900){
+    value = 1900;
+  }
+  return value;
+}
+
+int findDirection(int steeringVal){
+  
+  if (steeringVal < 1492){
+    // left
+    return 0;
+  }
+  
+  else if (steeringVal > 1492){
+    // right
+    return 2;
+  }
+  
+  else {
+    // straight 
+    return 1;
+  }
 }
 
 
