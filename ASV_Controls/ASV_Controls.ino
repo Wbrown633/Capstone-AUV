@@ -36,7 +36,7 @@ int doorPin_value;
 int doorMagnetPin_value;
 int thrusterPin_value;
 int steeringPin_value;
-int currentReading;
+double currentReading;
 int servoVal;
 int winchServoVal;
 int leftThrusterVal;
@@ -75,6 +75,13 @@ int pulse[] = {0,0};
 int thrusterMidPoint= 1500; 
 int thrusterOffset = 0; 
 
+// Constants for current sensor 
+int mVperAmp = 185; // use 100 for 20A Module and 66 for 30A Module
+int RawValue= 0;
+int ACSoffset = 2500; 
+double Voltage = 0;
+double Amps = 0;
+
 
 void setup() {
 
@@ -102,10 +109,7 @@ doorServo.attach(doorServoOutputPin);
 winchServo.attach(winchServoOutputPin);
 leftThrusterServo.attach(leftThrusterOutputPin);
 rightThrusterServo.attach(rightThrusterOutputPin);
-
-// set up interrupts for reading joystick inputs
-attachInterrupt(digitalPinToInterrupt(steeringPin), pwmSteering, CHANGE);
-attachInterrupt(digitalPinToInterrupt(thrusterPin), pwmThrottle, CHANGE);
+winchServo.writeMicroseconds(1500);
 
 // Set Relay Pins LOW to turn the relays OFF 
 digitalWrite(relayChargerMagnetPin, LOW);
@@ -148,30 +152,24 @@ void loop() {
     winchStatus = 1; // stationary
   }
   
-  currentReading = analogRead(A0);
-  // Debug Print Statements 
-  //serialPrintDebug();
+  currentReading = currentScaled(analogRead(A0));
   
   // Do stuff with the info we just got
   changeThruster();
   moveDoor(doorState, lastDoorState);
   moveWinch(winchStatus);
   airPumpState(airPumpOn);
-  //changeChargerMagnetState(chargerMagnetOn);
-  Serial.println("Left Motor : " + String(leftThrusterVal));
-  Serial.println("Right Motor : " + String(rightThrusterVal));
+  chargingState(currentReading);
+  //Serial.println(String(pulse[0]));
+  //Serial.println("Current Reading : " + String(currentReading));
   //serialPrintDebug();
 }
 
 // Print the values we just read for testing
 void serialPrintDebug(){
-  
-  
-  Serial.println("Steering : " + String(pulse[1]));
-  Serial.println("Thruster : " + String(pulse[0]));
+
   Serial.println("Winch : " + String(winchStatus));
-  Serial.println("Air Pump: " + String(airPumpOn));
-  Serial.println("Door Lock : " + String(doorLocked));
+  Serial.println("Door State : " + String(doorState));
   
   // Wait so that the print out is actually readable 
   delay(1000);
@@ -199,6 +197,10 @@ void changeThruster(){
   leftThrusterVal = throttleVal;
   rightThrusterVal = throttleVal;
   
+   
+  Serial.println("Left Motor : " + String(leftThrusterVal));
+  Serial.println("Right Motor : " + String(rightThrusterVal));
+  
   thrusterOffset = steerVal - thrusterMidPoint;
   
   direction = findDirection(steerVal);
@@ -209,22 +211,30 @@ void changeThruster(){
     // left
     // thruster Offset is negative
     leftThrusterVal = leftThrusterVal + thrusterOffset;
+    leftThrusterVal = normalizeThrusterValue(leftThrusterVal);
+    rightThrusterVal = normalizeThrusterValue(rightThrusterVal);
     break;
     
     case 2: 
     // right
     // thruster Offset is negative
-    rightThrusterVal = rightThrusterVal + thrusterOffset;
+    rightThrusterVal = rightThrusterVal - thrusterOffset;
+    leftThrusterVal = normalizeThrusterValue(leftThrusterVal);
+    rightThrusterVal = normalizeThrusterValue(rightThrusterVal);
     break;
     
     default:
     // straight
+    leftThrusterVal = normalizeThrusterValue(leftThrusterVal);
+    rightThrusterVal = normalizeThrusterValue(rightThrusterVal);
     break; 
   }
   
   
-  leftThrusterServo.writeMicroseconds(normalizeThrusterValue(leftThrusterVal));
-  rightThrusterServo.writeMicroseconds(normalizeThrusterValue(rightThrusterVal));
+  //Serial.println("Left Motor : " + String(leftThrusterVal));
+  //Serial.println("Right Motor : " + String(rightThrusterVal));
+  leftThrusterServo.writeMicroseconds(leftThrusterVal);
+  rightThrusterServo.writeMicroseconds(rightThrusterVal);
 }
 
 // update the status of the winch 
@@ -233,30 +243,31 @@ void moveWinch(byte winchStatus){
   switch (winchStatus){
     case 0:
     // down
-    winchServo.write(0);
+    if (prevWinchStatus != 0) {
+      winchServo.writeMicroseconds(1400);
+    }
+    
     prevWinchStatus = winchStatus;
     break;
     
     case 2: 
     // up 
     if (prevWinchStatus != 2) {
+      winchServo.writeMicroseconds(1550);
       changeMagnetState(relayChargerMagnetPin, 0); // turn charger magnet OFF 
       delay(1000);
-      winchServo.write(180);
       changeMagnetState(relayChargerMagnetPin, 1); // put charger magnet back ON
       prevWinchStatus = winchStatus;
     }
-    
-    else {
-      winchServo.write(180);
-      prevWinchStatus = winchStatus;
-    }
+    prevWinchStatus = winchStatus;
      
     break;
     
     default:
     // stationary
-    winchServo.write(90);
+    if (prevWinchStatus != 1) {
+      winchServo.writeMicroseconds(1500);
+    }
     prevWinchStatus = winchStatus;
     break; 
   }
@@ -342,26 +353,47 @@ void updateDoorState(int doorPin_value) {
 
 // open the door 
 void openDoor(){
-    doorServo.write(90);
+    
     changeMagnetState(relayDoorMagnetPin, 0); // turn the magnet off to open the door
-    delay(2000); // wait before turning the door magnet back on
+    delay(100);
+    doorServo.write(90);
+    delay(500); // wait before turning the door magnet back on
     changeMagnetState(relayDoorMagnetPin, 1);
+    lastDoorState = 1;
 }
 
 // close the door 
 void closeDoor(){
   // send servo to home position (closed)
   doorServo.write(0);
+  changeMagnetState(relayDoorMagnetPin, 1);
+  digitalWrite(relayDoorMagnetPin, LOW);
+  lastDoorState = 0;
 }
 
 // Make sure the pwm value cannot be outside the values the motor can handle 
 int normalizeThrusterValue(int value){
+  // if the value is really low, the RC transmitter is off. Default to stationary
+  if (value < 100){
+    value = 1500;
+    return value;
+  }
+  // if our subtraction puts us under max reverse, pass the min value
   if (value < 1100){
     value = 1100;
+    return value;
   }
-  else if (value > 1900){
+  // if our addition puts us over the max throttle, pass the max value 
+  if (value > 1900){
     value = 1900;
+    return value;
   }
+  // allow the thrusters to more easily be held at 0
+  if (value > 1400 && value < 1500) {
+    value = 1500;
+    return value;
+  }
+  
   return value;
 }
 
@@ -383,6 +415,23 @@ int findDirection(int steeringVal){
   }
 }
 
+// turn on the charging light if the phone is charging 
+void chargingState(int currentReading){
+  if (currentReading < -0.5){
+    // turn the light on 
+    digitalWrite(relayLightPin, HIGH);
+  }
+  else {
+    digitalWrite(relayLightPin, LOW);
+  }
+}
+
+// process current reading 
+double currentScaled(int rawReading){
+  Voltage = (rawReading / 1024.0) * 5000; // Gets you mV
+  Amps = ((Voltage - ACSoffset) / mVperAmp);
+  return Amps;
+}
 
 
   
