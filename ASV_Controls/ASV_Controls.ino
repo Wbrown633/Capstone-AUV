@@ -160,9 +160,7 @@ void loop() {
   moveWinch(winchStatus);
   airPumpState(airPumpOn);
   chargingState(currentReading);
-  //Serial.println(String(pulse[0]));
-  //Serial.println("Current Reading : " + String(currentReading));
-  //serialPrintDebug();
+
 }
 
 // Print the values we just read for testing
@@ -197,10 +195,6 @@ void changeThruster(){
   leftThrusterVal = throttleVal;
   rightThrusterVal = throttleVal;
   
-   
-  Serial.println("Left Motor : " + String(leftThrusterVal));
-  Serial.println("Right Motor : " + String(rightThrusterVal));
-  
   thrusterOffset = steerVal - thrusterMidPoint;
   
   direction = findDirection(steerVal);
@@ -230,9 +224,6 @@ void changeThruster(){
     break; 
   }
   
-  
-  //Serial.println("Left Motor : " + String(leftThrusterVal));
-  //Serial.println("Right Motor : " + String(rightThrusterVal));
   leftThrusterServo.writeMicroseconds(leftThrusterVal);
   rightThrusterServo.writeMicroseconds(rightThrusterVal);
 }
